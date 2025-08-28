@@ -1,0 +1,12 @@
+# Force all text files to use LF in repo
+* text=auto eol=lf
+
+# Specific overrides
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.sh  text eol=lf
+
+# Ensure UTF-8 for code/data
+*.py  text working-tree-encoding=UTF-8
+*.json text working-tree-encoding=UTF-8
+*.csv  text working-tree-encoding=UTF-8
