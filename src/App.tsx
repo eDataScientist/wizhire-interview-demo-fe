@@ -1,7 +1,7 @@
 import { GoogleGenAI, Modality, Session } from "@google/genai";
 import "./App.css";
 import { useMicVAD } from "@ricky0123/vad-react";
-import { useState } from "react";
+import { useState, useRef } from "react";
 
 function App() {
   let vad = useMicVAD({
@@ -19,18 +19,18 @@ function App() {
   let sendAudioTimeout: number;
   const [active, setActive] = useState(false);
   const [textInput, setTextInput] = useState("");
-  let responseQueue: any[] = [];
+  const responseQueue = useRef<any[]>([]);
   let audioChunks: any[] = [];
 
   const backendUrl = "http://localhost:8000/token";
 
   async function waitMessage() {
-    console.log("response queue", responseQueue);
+    console.log("response queue", responseQueue.current);
     let done = false;
     let message = undefined;
     while (!done) {
-      message = responseQueue.shift();
-      console.log("Waiting for message...", message);
+      message = responseQueue.current.shift();
+      console.log("Message:", message);
       if (message) {
         done = true;
       } else {
@@ -47,9 +47,15 @@ function App() {
     while (!done) {
       const message = await waitMessage();
       turns.push(message);
-      if (message.serverContent && message.serverContent.turnComplete) {
+      // console.log("HandleTurn - Message:", message);
+      if (
+        message &&
+        message.serverContent &&
+        message.serverContent.turnComplete
+      ) {
         done = true;
       }
+      // await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     console.log("exiting loop");
     return turns;
@@ -97,7 +103,8 @@ function App() {
       callbacks: {
         onmessage: (message) => {
           console.log("Received message:", message);
-          responseQueue.push(message);
+          responseQueue.current.push(message);
+          console.log("Updated response queue", responseQueue.current);
         },
         onopen: () => {
           console.log("WebSocket connection opened");
@@ -128,7 +135,7 @@ function App() {
 
     const turns = await handleTurn();
 
-    // console.log("Completed turns:", turns);
+    console.log("Completed turns:", turns);
     for (const turn of turns) {
       if (turn.text) {
         console.log("Received text: %s\n", turn.text);
@@ -150,7 +157,9 @@ function App() {
             }`}
           >
             Connection Live{" "}
-            <span className="material-symbols-sharp">toggle_off</span>
+            <span className="material-symbols-sharp">
+              {active ? "toggle_on" : "toggle_off"}
+            </span>
           </p>
         </header>
         <section className="flex-1">
