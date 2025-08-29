@@ -3,6 +3,7 @@ import "./App.css";
 import { useMicVAD } from "@ricky0123/vad-react";
 import { useState, useRef } from "react";
 import type { Message } from "./lib/types";
+import { WaveFile } from "wavefile";
 import MessageRow from "./lib/MessageRow";
 
 function App() {
@@ -23,17 +24,17 @@ function App() {
   const [textInput, setTextInput] = useState("");
   const responseQueue = useRef<any[]>([]);
   const [messageHistory, setMessageHistory] = useState<Message[]>([]);
+  const audioCtx = new AudioContext();
   let audioChunks: any[] = [];
 
   const backendUrl = "http://localhost:8000/token";
-
   async function waitMessage() {
-    console.log("response queue", responseQueue.current);
+    // console.log("response queue", responseQueue.current);
     let done = false;
     let message = undefined;
     while (!done) {
       message = responseQueue.current.shift();
-      console.log("Message:", message);
+      // console.log("Message:", message);
       if (message) {
         done = true;
       } else {
@@ -46,7 +47,7 @@ function App() {
   async function handleTurn() {
     const turns = [];
     let done = false;
-    console.log("entering loop");
+    // console.log("entering loop");
     while (!done) {
       const message = await waitMessage();
       turns.push(message);
@@ -60,7 +61,7 @@ function App() {
       }
       // await new Promise((resolve) => setTimeout(resolve, 2000));
     }
-    console.log("exiting loop");
+    // console.log("exiting loop");
     return turns;
   }
 
@@ -77,7 +78,7 @@ function App() {
   const [ai, setAi] = useState<GoogleGenAI | null>(null);
   const [liveSession, setLiveSession] = useState<Session | null>(null);
   const model = "gemini-live-2.5-flash-preview";
-  const config = { responseModalities: [Modality.TEXT] };
+  const config = { responseModalities: [Modality.AUDIO] };
 
   // Function to start session
   // Gets token from backend
@@ -105,9 +106,9 @@ function App() {
       config: config,
       callbacks: {
         onmessage: (message) => {
-          console.log("Received message:", message);
+          // console.log("Received message:", message);
           responseQueue.current.push(message);
-          console.log("Updated response queue", responseQueue.current);
+          // console.log("Updated response queue", responseQueue.current);
         },
         onopen: () => {
           console.log("WebSocket connection opened");
@@ -138,18 +139,39 @@ function App() {
 
     const turns = await handleTurn();
 
-    setMessageHistory((prev) => [...prev, { role: "user", text: textInput }]);
+    // setMessageHistory((prev) => [...prev, { role: "user", text: textInput }]);
 
-    // console.log("Completed turns:", turns);
-    // for (const turn of turns) {
-    //   if (turn.text) {
-    //     console.log("Received text: %s\n", turn.text);
-    //   } else if (turn.data) {
-    //     console.log("Received inline data: %s\n", turn.data);
-    //   }
-    // }
+    // Combine audio data strings and save as wave file
+    const combinedAudio = turns.reduce((acc, turn) => {
+      if (turn.data) {
+        // Browser-compatible base64 decoding
+        const binaryString = atob(turn.data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const intArray = new Int16Array(bytes.buffer);
+        return acc.concat(Array.from(intArray));
+      }
+      return acc;
+    }, []);
 
-    await displayTextMessage(turns);
+    const audioBuffer = new Int16Array(combinedAudio);
+    const wf = new WaveFile();
+    wf.fromScratch(1, 24000, "16", audioBuffer);
+    wf.toSampleRate(44100);
+
+    // Create blob URL from WaveFile and play it
+    const waveBuffer = wf.toBuffer();
+    const blob = new Blob([new Uint8Array(waveBuffer)], { type: 'audio/wav' });
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio(audioUrl);
+    audio.play();
+
+    // Clean up the URL when done
+    audio.addEventListener('ended', () => {
+      URL.revokeObjectURL(audioUrl);
+    });
 
     setTextInput("");
   }
