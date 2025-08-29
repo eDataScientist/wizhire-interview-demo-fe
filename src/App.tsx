@@ -2,6 +2,8 @@ import { GoogleGenAI, Modality, Session } from "@google/genai";
 import "./App.css";
 import { useMicVAD } from "@ricky0123/vad-react";
 import { useState, useRef } from "react";
+import type { Message } from "./lib/types";
+import MessageRow from "./lib/MessageRow";
 
 function App() {
   let vad = useMicVAD({
@@ -20,6 +22,7 @@ function App() {
   const [active, setActive] = useState(false);
   const [textInput, setTextInput] = useState("");
   const responseQueue = useRef<any[]>([]);
+  const [messageHistory, setMessageHistory] = useState<Message[]>([]);
   let audioChunks: any[] = [];
 
   const backendUrl = "http://localhost:8000/token";
@@ -135,16 +138,39 @@ function App() {
 
     const turns = await handleTurn();
 
-    console.log("Completed turns:", turns);
+    setMessageHistory((prev) => [...prev, { role: "user", text: textInput }]);
+
+    // console.log("Completed turns:", turns);
+    // for (const turn of turns) {
+    //   if (turn.text) {
+    //     console.log("Received text: %s\n", turn.text);
+    //   } else if (turn.data) {
+    //     console.log("Received inline data: %s\n", turn.data);
+    //   }
+    // }
+
+    await displayTextMessage(turns);
+
+    setTextInput("");
+  }
+
+  async function displayTextMessage(turns: any[]) {
+    let responseMsg = "";
+
     for (const turn of turns) {
       if (turn.text) {
-        console.log("Received text: %s\n", turn.text);
-      } else if (turn.data) {
-        console.log("Received inline data: %s\n", turn.data);
+        responseMsg += turn.text;
+      } else {
+        // responseMsg += `Received inline data: ${turn.data}\n`;
+        continue;
       }
     }
 
-    setTextInput("");
+    console.log(responseMsg);
+    setMessageHistory((prev) => [
+      ...prev,
+      { role: "model", text: responseMsg },
+    ]);
   }
   return (
     <>
@@ -165,7 +191,9 @@ function App() {
         <section className="flex-1">
           <div className="flex flex-col h-full">
             <div className="flex-1 overflow-y-auto">
-              {/* Messages will be rendered here */}
+              {messageHistory.map((msg, index) => (
+                <MessageRow key={index} message={msg} />
+              ))}
             </div>
             <div className="p-4">
               {active && (
