@@ -13,6 +13,7 @@ import MessageRow from "./lib/MessageRow";
 
 function App() {
   let vad = useMicVAD({
+    positiveSpeechThreshold: 0.7,
     onSpeechEnd: (audioChunk) => {
       // audioChunks.push(audioChunk);
       const startTime = performance.now();
@@ -75,7 +76,7 @@ function App() {
   const backendUrl = "http://localhost:8000/token";
 
   async function playAudioChunks(wf: WaveFile) {
-    wf.toSampleRate(44100);
+    wf.toSampleRate(24000);
     const url = wf.toDataURI();
     const audio = new Audio(url);
 
@@ -365,7 +366,7 @@ function App() {
     // const audioBuffer = new Int16Array(intArray);
     const wf = new WaveFile();
     wf.fromScratch(1, 24000, "16", intArray);
-    wf.toSampleRate(44100);
+    wf.toSampleRate(24000);
 
     // Create blob URL from WaveFile and play it
     const waveBuffer = wf.toBuffer();
@@ -394,12 +395,12 @@ function App() {
   }
 
   async function processAudioQueue(audioBuffer: Int16Array) {
-    if (!audioPlaying.current) return;
+    // if (!audioPlaying.current) return;
     if (!audioBuffer || audioBuffer.length === 0) return;
 
     const wf = new WaveFile();
     wf.fromScratch(1, 24000, "16", audioBuffer);
-    wf.toSampleRate(44100);
+    // wf.toSampleRate(24000);
 
     // Create blob URL from WaveFile and play it
     const waveBuffer = wf.toBuffer();
@@ -465,7 +466,7 @@ function App() {
     );
     const wf = new WaveFile();
     wf.fromScratch(1, 24000, "16", audioBuffer);
-    wf.toSampleRate(44100);
+    // wf.toSampleRate(24000);
     const waveFileTime = performance.now();
     console.log(
       `[${waveFileTime.toFixed(2)}ms] Created wavefile (${(
