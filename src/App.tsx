@@ -1,4 +1,9 @@
-import { GoogleGenAI, Modality, Session } from "@google/genai";
+import {
+  GoogleGenAI,
+  LiveServerMessage,
+  Modality,
+  Session,
+} from "@google/genai";
 import "./App.css";
 import { useMicVAD } from "@ricky0123/vad-react";
 import { useState, useRef } from "react";
@@ -62,6 +67,8 @@ function App() {
   const [messageHistory, setMessageHistory] = useState<Message[]>([]);
   const firstMessageTime = useRef<number | null>(null);
   const lastMessageTime = useRef<number | null>(null);
+  const audioPlaying = useRef<boolean>(false);
+  const audioPlaybackQueue = useRef<Int16Array>(new Int16Array(0));
   const audioCtx = new AudioContext();
   let audioChunks: any[] = [];
 
@@ -114,15 +121,31 @@ function App() {
       ) {
         done = true;
         const turnCompleteTime = performance.now();
-        console.log(`[${turnCompleteTime.toFixed(2)}ms] Turn complete detected (${(turnCompleteTime - turnStartTime).toFixed(2)}ms turn duration)`);
+        console.log(
+          `[${turnCompleteTime.toFixed(2)}ms] Turn complete detected (${(
+            turnCompleteTime - turnStartTime
+          ).toFixed(2)}ms turn duration)`
+        );
         if (lastMessageTime.current && firstMessageTime.current) {
-          console.log(`[${turnCompleteTime.toFixed(2)}ms] Message span: first at ${firstMessageTime.current.toFixed(2)}ms, last at ${lastMessageTime.current.toFixed(2)}ms (${(lastMessageTime.current - firstMessageTime.current).toFixed(2)}ms total)`);
+          console.log(
+            `[${turnCompleteTime.toFixed(
+              2
+            )}ms] Message span: first at ${firstMessageTime.current.toFixed(
+              2
+            )}ms, last at ${lastMessageTime.current.toFixed(2)}ms (${(
+              lastMessageTime.current - firstMessageTime.current
+            ).toFixed(2)}ms total)`
+          );
         }
       }
       // await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     const turnEndTime = performance.now();
-    console.log(`[${turnEndTime.toFixed(2)}ms] Turn handling complete (${(turnEndTime - turnStartTime).toFixed(2)}ms total)`);
+    console.log(
+      `[${turnEndTime.toFixed(2)}ms] Turn handling complete (${(
+        turnEndTime - turnStartTime
+      ).toFixed(2)}ms total)`
+    );
     // Reset message timing for next turn
     firstMessageTime.current = null;
     lastMessageTime.current = null;
@@ -193,15 +216,29 @@ function App() {
       callbacks: {
         onmessage: (message) => {
           const messageTime = performance.now();
+
           if (firstMessageTime.current === null) {
             firstMessageTime.current = messageTime;
-            console.log(`[${messageTime.toFixed(2)}ms] First message received from server:`, message);
+            console.log(
+              `[${messageTime.toFixed(
+                2
+              )}ms] First message received from server:`,
+              message
+            );
           } else {
-            console.log(`[${messageTime.toFixed(2)}ms] Message received from server:`, message);
+            console.log(
+              `[${messageTime.toFixed(2)}ms] Message received from server:`,
+              message
+            );
           }
           lastMessageTime.current = messageTime;
-          responseQueue.current.push(message);
-          console.log("Updated response queue", responseQueue.current);
+          // responseQueue.current.push(message);
+          // console.log("Updated response queue", responseQueue.current);
+          console.log("Playing audio chunk");
+          // Play the audio chunk here
+          processAudioChunk(message).catch((error) => {
+            console.error("Error processing audio chunk:", error);
+          });
         },
         onopen: () => {
           const connectionOpenTime = performance.now();
@@ -255,7 +292,7 @@ function App() {
     const audioSentTime = performance.now();
     console.log(`[${audioSentTime.toFixed(2)}ms] Audio sent`);
 
-    await processAudioTurn();
+    // await processAudioTurn();
   }
 
   // Function to send text to session
@@ -294,6 +331,98 @@ function App() {
       ...prev,
       { role: "model", text: responseMsg },
     ]);
+  }
+
+  async function processAudioChunk(turnData: LiveServerMessage) {
+    if (turnData.serverContent?.generationComplete) {
+      // Handle the case when the generation is complete
+      audioPlaying.current = false;
+    }
+    if (!turnData?.data) {
+      console.log("No data here");
+      return;
+    }
+
+    const binaryString = atob(turnData.data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    const intArray = new Int16Array(bytes.buffer);
+
+    if (audioPlaying.current) {
+      const newQueue = new Int16Array(
+        audioPlaybackQueue.current.length + intArray.length
+      );
+      newQueue.set(audioPlaybackQueue.current);
+      newQueue.set(intArray, audioPlaybackQueue.current.length);
+      audioPlaybackQueue.current = newQueue;
+      return;
+    } else {
+      audioPlaying.current = true;
+    }
+    // const audioBuffer = new Int16Array(intArray);
+    const wf = new WaveFile();
+    wf.fromScratch(1, 24000, "16", intArray);
+    wf.toSampleRate(44100);
+
+    // Create blob URL from WaveFile and play it
+    const waveBuffer = wf.toBuffer();
+    const blob = new Blob([new Uint8Array(waveBuffer)], { type: "audio/wav" });
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio(audioUrl);
+    audio.addEventListener("ended", () => {
+      console.log("Audio playback ended");
+      URL.revokeObjectURL(audioUrl);
+      const audioPlaybackQueueTemp: Int16Array = Int16Array.from(
+        audioPlaybackQueue.current
+      );
+      // flush the queue
+      audioPlaybackQueue.current = new Int16Array(0);
+      processAudioQueue(audioPlaybackQueueTemp)
+        .then(() => {
+          console.log("Processed audio playback queue");
+        })
+        .catch((error) => {
+          console.error("Error processing audio playback queue:", error);
+        });
+    });
+    audio.play();
+
+    // Clean up the URL when done
+  }
+
+  async function processAudioQueue(audioBuffer: Int16Array) {
+    if (!audioPlaying.current) return;
+    if (!audioBuffer || audioBuffer.length === 0) return;
+
+    const wf = new WaveFile();
+    wf.fromScratch(1, 24000, "16", audioBuffer);
+    wf.toSampleRate(44100);
+
+    // Create blob URL from WaveFile and play it
+    const waveBuffer = wf.toBuffer();
+    const blob = new Blob([new Uint8Array(waveBuffer)], { type: "audio/wav" });
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio(audioUrl);
+
+    audio.addEventListener("ended", () => {
+      URL.revokeObjectURL(audioUrl);
+      const audioPlaybackQueueTemp: Int16Array = Int16Array.from(
+        audioPlaybackQueue.current
+      );
+      // flush the queue
+      audioPlaybackQueue.current = new Int16Array(0);
+      processAudioQueue(audioPlaybackQueueTemp)
+        .then(() => {
+          console.log("Processed audio playback queue");
+        })
+        .catch((error) => {
+          console.error("Error processing audio playback queue:", error);
+        });
+    });
+    audio.play();
   }
 
   async function processAudioTurn() {
