@@ -11,6 +11,20 @@ function App() {
     onSpeechEnd: (audioChunk) => {
       // audioChunks.push(audioChunk);
       console.log("Speech ended, audio chunk:", audioChunk);
+      const audioBuffer = new Float32Array(audioChunk.buffer);
+      const wf = new WaveFile();
+      wf.fromScratch(1, 16000, "32f", audioBuffer);
+      wf.toBitDepth("16");
+
+      const audiob64 = wf.toBase64();
+
+      sendAudio(audiob64)
+        .then(() => {
+          console.log("Audio sent successfully");
+        })
+        .catch((error) => {
+          console.error("Error sending audio:", error);
+        });
     },
 
     onSpeechRealStart: () => {
@@ -28,6 +42,21 @@ function App() {
   let audioChunks: any[] = [];
 
   const backendUrl = "http://localhost:8000/token";
+
+  async function playAudioChunks(wf: WaveFile) {
+    wf.toSampleRate(44100);
+    const url = wf.toDataURI();
+    const audio = new Audio(url);
+
+    audio.play().catch((error) => {
+      console.error("Error playing audio:", error);
+    });
+
+    audio.addEventListener("ended", () => {
+      URL.revokeObjectURL(url);
+    });
+  }
+
   async function waitMessage() {
     // console.log("response queue", responseQueue.current);
     let done = false;
@@ -123,9 +152,22 @@ function App() {
     });
 
     setLiveSession(session);
+    vad.start();
   }
 
   // Function to send audio to session
+  async function sendAudio(audioB64: string) {
+    if (!liveSession) return;
+
+    liveSession.sendRealtimeInput({
+      audio: {
+        data: audioB64,
+        mimeType: "audio/pcm;rate=16000",
+      },
+    });
+
+    await processAudioTurn();
+  }
 
   // Function to send text to session
   async function sendText() {
@@ -137,6 +179,31 @@ function App() {
       turns: textInput,
     });
 
+    await processAudioTurn();
+
+    setTextInput("");
+  }
+
+  async function displayTextMessage(turns: any[]) {
+    let responseMsg = "";
+
+    for (const turn of turns) {
+      if (turn.text) {
+        responseMsg += turn.text;
+      } else {
+        // responseMsg += `Received inline data: ${turn.data}\n`;
+        continue;
+      }
+    }
+
+    console.log(responseMsg);
+    setMessageHistory((prev) => [
+      ...prev,
+      { role: "model", text: responseMsg },
+    ]);
+  }
+
+  async function processAudioTurn() {
     const turns = await handleTurn();
 
     // setMessageHistory((prev) => [...prev, { role: "user", text: textInput }]);
@@ -163,36 +230,15 @@ function App() {
 
     // Create blob URL from WaveFile and play it
     const waveBuffer = wf.toBuffer();
-    const blob = new Blob([new Uint8Array(waveBuffer)], { type: 'audio/wav' });
+    const blob = new Blob([new Uint8Array(waveBuffer)], { type: "audio/wav" });
     const audioUrl = URL.createObjectURL(blob);
     const audio = new Audio(audioUrl);
     audio.play();
 
     // Clean up the URL when done
-    audio.addEventListener('ended', () => {
+    audio.addEventListener("ended", () => {
       URL.revokeObjectURL(audioUrl);
     });
-
-    setTextInput("");
-  }
-
-  async function displayTextMessage(turns: any[]) {
-    let responseMsg = "";
-
-    for (const turn of turns) {
-      if (turn.text) {
-        responseMsg += turn.text;
-      } else {
-        // responseMsg += `Received inline data: ${turn.data}\n`;
-        continue;
-      }
-    }
-
-    console.log(responseMsg);
-    setMessageHistory((prev) => [
-      ...prev,
-      { role: "model", text: responseMsg },
-    ]);
   }
   return (
     <>
@@ -220,7 +266,8 @@ function App() {
             <div className="p-4">
               {active && (
                 <div className=" w-full p-1 flex gap-2">
-                  <input
+                  <p>User Speaking: {vad.userSpeaking}</p>
+                  {/* <input
                     id="user-input"
                     type="text"
                     title="user-input"
@@ -232,7 +279,7 @@ function App() {
                     onClick={sendText}
                   >
                     <span className="material-symbols-sharp">send</span>
-                  </button>
+                  </button> */}
                 </div>
               )}
               {!active && (
